@@ -1,5 +1,6 @@
 import io
 import os
+from functools import wraps
 from datetime import datetime, timezone
 
 import qrcode
@@ -37,10 +38,15 @@ class User(UserMixin, db.Model):
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
 
+    def get_id(self):
+        return f"admin:{self.id}"
+
 
 @login_manager.user_loader
 def load_user(user_id):
-    return db.session.get(User, int(user_id))
+    kind, record_id = user_id.split(":", 1)
+    model = User if kind == "admin" else Student
+    return db.session.get(model, int(record_id))
 
 
 class Stand(db.Model):
@@ -59,7 +65,7 @@ class Stand(db.Model):
         return f"{self.floor}th Floor" if self.floor not in {3, 4} else f"{self.floor}rd Floor" if self.floor == 3 else "4th Floor"
 
 
-class Student(db.Model):
+class Student(UserMixin, db.Model):
     __tablename__ = "students"
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.String(30), unique=True, nullable=False)
@@ -82,6 +88,13 @@ class Student(db.Model):
 
     def check_password(self, password):
         return bool(self.password_hash) and check_password_hash(self.password_hash, password)
+
+    def get_id(self):
+        return f"student:{self.id}"
+
+    @property
+    def role(self):
+        return "student"
 
 
 class Book(db.Model):
@@ -213,6 +226,18 @@ def record_event(book, event_type, student=None, note=None):
     db.session.add(Activity(event_type=event_type, book_id=book.id, student_id=student.id if student else None, student_name=student.name if student else None, note=note))
 
 
+def admin_required(view):
+    @wraps(view)
+    @login_required
+    def wrapped(*args, **kwargs):
+        if getattr(current_user, "role", None) != "librarian":
+            flash("This area is restricted to administrators.", "warning")
+            return redirect(url_for("dashboard"))
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
 def register_routes(app):
     @app.context_processor
     def inject_helpers():
@@ -223,9 +248,13 @@ def register_routes(app):
         if current_user.is_authenticated:
             return redirect(url_for("dashboard"))
         if request.method == "POST":
-            user = User.query.filter_by(username=request.form.get("username", "").strip()).first()
-            if user and user.check_password(request.form.get("password", "")):
-                login_user(user)
+            username = request.form.get("username", "").strip()
+            password = request.form.get("password", "")
+            user = User.query.filter_by(username=username).first()
+            student = Student.query.filter(or_(Student.student_id == username.upper(), Student.usn == username.upper(), Student.college_email == username.lower())).first()
+            identity = user if user and user.check_password(password) else student if student and student.account_status == "active" and student.check_password(password) else None
+            if identity:
+                login_user(identity)
                 return redirect(request.args.get("next") or url_for("dashboard"))
             flash("Invalid username or password.", "warning")
         return render_template("login.html")
@@ -239,6 +268,9 @@ def register_routes(app):
     @app.get("/")
     @login_required
     def dashboard():
+        if getattr(current_user, "role", None) == "student":
+            active_loans = Loan.query.filter_by(student_id=current_user.id, returned_at=None).order_by(Loan.borrowed_at.desc()).all()
+            return render_template("student_dashboard.html", student=current_user, active_loans=active_loans)
         stats = {"books": Book.query.count(), "available": Book.query.filter_by(status="AVAILABLE").count(), "borrowed": Book.query.filter_by(status="BORROWED").count(), "students": Student.query.count(), "scans": db.session.query(func.coalesce(func.sum(Book.scan_count), 0)).scalar()}
         popular = Book.query.order_by(Book.scan_count.desc()).limit(5).all()
         floor_rows = db.session.query(Stand.floor, func.count(Activity.id)).join(Book, Book.stand_id == Stand.id).outerjoin(Activity, Activity.book_id == Book.id).group_by(Stand.floor).order_by(Stand.floor).all()
@@ -247,7 +279,7 @@ def register_routes(app):
         return render_template("dashboard.html", stats=stats, popular=popular, floor_rows=floor_rows, stand_rows=stand_rows, recent=recent)
 
     @app.get("/books")
-    @login_required
+    @admin_required
     def books():
         query = Book.query
         search, status, floor = request.args.get("q", "").strip(), request.args.get("status", ""), request.args.get("floor", "")
@@ -260,7 +292,7 @@ def register_routes(app):
         return render_template("books.html", books=query.order_by(Book.title).all(), search=search, status=status, floor=floor)
 
     @app.get("/stands")
-    @login_required
+    @admin_required
     def stands():
         stand_list = Stand.query.order_by(Stand.floor, Stand.code).all()
         for stand in stand_list:
@@ -268,7 +300,7 @@ def register_routes(app):
         return render_template("stands.html", stands=stand_list)
 
     @app.route("/stands/new", methods=["GET", "POST"])
-    @login_required
+    @admin_required
     def create_stand():
         if request.method == "POST":
             floor = request.form.get("floor", "").strip()
@@ -289,7 +321,7 @@ def register_routes(app):
         return render_template("stand_form.html")
 
     @app.get("/students")
-    @login_required
+    @admin_required
     def students():
         student_list = Student.query.order_by(Student.name).all()
         for student in student_list:
@@ -298,7 +330,7 @@ def register_routes(app):
         return render_template("students.html", students=student_list)
 
     @app.route("/students/new", methods=["GET", "POST"])
-    @login_required
+    @admin_required
     def create_student():
         if request.method == "POST":
             form = {key: request.form.get(key, "").strip() for key in ("student_id", "usn", "full_name", "college_email", "phone", "course", "semester", "section", "password")}
@@ -317,7 +349,7 @@ def register_routes(app):
         return render_template("student_form.html")
 
     @app.route("/books/new", methods=["GET", "POST"])
-    @login_required
+    @admin_required
     def create_book():
         stands = Stand.query.order_by(Stand.floor, Stand.code).all()
         if request.method == "POST":
@@ -338,7 +370,7 @@ def register_routes(app):
         return render_template("book_form.html", stands=stands)
 
     @app.get("/books/<book_code>")
-    @login_required
+    @admin_required
     def book_detail(book_code):
         book = Book.query.filter_by(book_code=book_code).first_or_404()
         history = Activity.query.filter_by(book_id=book.id).order_by(Activity.occurred_at.desc()).limit(15).all()
@@ -346,7 +378,7 @@ def register_routes(app):
         return render_template("book_detail.html", book=book, history=history, active_loan=active_loan)
 
     @app.get("/books/<book_code>/qr.png")
-    @login_required
+    @admin_required
     def book_qr(book_code):
         book = Book.query.filter_by(book_code=book_code).first_or_404()
         image = qrcode.make(url_for("scan_book", book_code=book.book_code, _external=True))
@@ -392,7 +424,7 @@ def register_routes(app):
         return render_template("student_borrow.html", available_books=available_books)
 
     @app.post("/books/<book_code>/borrow")
-    @login_required
+    @admin_required
     def borrow_book(book_code):
         book = Book.query.filter_by(book_code=book_code).first_or_404()
         if book.status != "AVAILABLE":
@@ -411,7 +443,7 @@ def register_routes(app):
         return redirect(url_for("book_detail", book_code=book_code))
 
     @app.post("/books/<book_code>/return")
-    @login_required
+    @admin_required
     def return_book(book_code):
         book = Book.query.filter_by(book_code=book_code).first_or_404()
         loan = Loan.query.filter_by(book_id=book.id, returned_at=None).first()
@@ -423,19 +455,19 @@ def register_routes(app):
         return redirect(url_for("book_detail", book_code=book_code))
 
     @app.get("/history")
-    @login_required
+    @admin_required
     def history():
         return render_template("history.html", events=Activity.query.order_by(Activity.occurred_at.desc()).limit(200).all())
 
     @app.get("/loans")
-    @login_required
+    @admin_required
     def loans():
         active_loans = Loan.query.filter_by(returned_at=None).order_by(Loan.borrowed_at.desc()).all()
         returned_loans = Loan.query.filter(Loan.returned_at.is_not(None)).order_by(Loan.returned_at.desc()).limit(100).all()
         return render_template("loans.html", active_loans=active_loans, returned_loans=returned_loans)
 
     @app.get("/api/summary")
-    @login_required
+    @admin_required
     def api_summary():
         return jsonify({"books": Book.query.count(), "available": Book.query.filter_by(status="AVAILABLE").count(), "borrowed": Book.query.filter_by(status="BORROWED").count(), "scans": db.session.query(func.coalesce(func.sum(Book.scan_count), 0)).scalar()})
 

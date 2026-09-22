@@ -13,14 +13,14 @@
     <div class="brand login-brand"><span class="brand-mark">M</span><span>MBA<br><b>Reading Stand</b></span></div>
     <span class="eyebrow">RESOURCE DESK</span>
     <h1>Welcome back</h1>
-    <p class="muted">Sign in to manage the department reading collection.</p>
+    <p class="muted">Sign in to open your student dashboard or manage the department collection.</p>
     {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="alert alert-warning">{{ message }}</div>{% endfor %}{% endwith %}
     <form method="post" class="login-form">
-      <label>Username<input name="username" required autofocus value="admin"></label>
+      <label>Username, Student ID, USN, or email<input name="username" required autofocus value="admin"></label>
       <label>Password<input type="password" name="password" required placeholder="Enter password"></label>
       <button class="btn btn-dark w-100">Sign in <i class="bi bi-arrow-right ms-2"></i></button>
     </form>
-    <small class="muted">Local administrator account: admin / admin123</small>
+    <small class="muted">Administrators use admin credentials. Students use their Student ID, USN, or college email.</small>
   </main>
 </body>
 </html>

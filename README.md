@@ -47,6 +47,12 @@ A Flask + SQLAlchemy + Jinja2 + Bootstrap application for tracking the MBA depar
 
 The first start creates the tables, creates the local `admin` user, and seeds the 14 reading stands and their books. Open `http://127.0.0.1:5000` and sign in with `admin` and the value of `ADMIN_PASSWORD`.
 
+## Unified home page
+
+Both account types use the same `/` entry point. Administrators sign in with the admin username and see the complete management dashboard. Students sign in with their Student ID, USN, or college email and see only their student dashboard and active loans. Student sessions cannot access admin inventory, stand, history, loan, or analytics routes.
+
+Students can also use `/student/borrow` to select an available book and create a borrowing record. Administrators can review and return active loans at `/loans`.
+
 ## GitHub and Render deployment
 
 The repository includes `render.yaml` and a production `Procfile`. Create a GitHub repository, push this project, then create a Render Web Service from the repository. Set these environment variables in Render:
