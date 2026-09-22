@@ -1,0 +1,4 @@
+{% extends "base.html" %}
+{% block title %}Scan {{ book.book_code }} | MBA Reading Stand{% endblock %}
+{% block page_heading %}Log a book view{% endblock %}
+{% block content %}<div class="scan-page"><div class="scan-book-mark">{{ book.title[0] }}</div><span class="eyebrow">{{ book.book_code }} · {{ book.category }}</span><h2>{{ book.title }}</h2><p class="author-line">{{ book.author }}</p><p class="muted">Tell us who is reading so the department can understand which resources are useful.</p><form class="scan-form panel" method="post"><label>Student ID<input name="student_id" required placeholder="e.g. MBA24-017"></label><label>Your name<input name="name" required placeholder="Full name"></label><button class="btn btn-dark btn-lg w-100">Record my view <i class="bi bi-arrow-right ms-2"></i></button></form></div>{% endblock %}
